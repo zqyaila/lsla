@@ -79,7 +79,10 @@ done
 # 询问是否安装 WutheringWavesUID 2.0 插件
 read -p "是否安装 WutheringWavesUID 2.0 插件？(y/n)： " -r install_plugin
 if [[ $install_plugin =~ ^[Yy]$ ]]; then
-    cd gsuid_core
+    cd gsuid_core || {
+        echo "错误：进入 plugins 目录失败"
+        exit 1
+    }
     mkdir -p plugins  # 确保 plugins 目录存在
     cd plugins || {
         echo "错误：进入 plugins 目录失败"
