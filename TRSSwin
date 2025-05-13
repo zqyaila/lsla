@@ -1,0 +1,81 @@
+#!/bin/bash
+
+clear
+
+# 定义颜色
+RED='\e[1;31m'   # 红色加粗
+GREEN='\e[1;32m' # 绿色加粗
+NC='\e[0m'       # 无颜色
+
+# 安装 TRSS-Yunzai
+YUNZAI_DIR="Yunzai"
+PLUGINS_DIR="./plugins"
+GIT_CLONE="git clone --depth=1"
+
+# 克隆主项目
+echo -e "${GREEN} TRSS-Yunzai 正在安装...${NC}"
+$GIT_CLONE https://gitee.com/TimeRainStarSky/Yunzai
+
+cd $YUNZAI_DIR
+
+# 插件列表
+declare -A plugins=(
+
+    ["Guoba-Plugin"]="https://gitee.com/guoba-yunzai/guoba-plugin.git"
+
+    ["ws-plugin"]="https://gitee.com/xiaoye12123/ws-plugin"
+
+    ["rconsole-plugin"]="https://gitee.com/kyrzy0416/rconsole-plugin"
+
+    ["waves-plugin"]="https://github.com/erzaozi/waves-plugin"
+
+    ["yenai-plugin"]="https://gitee.com/yeyang52/yenai-plugin"
+
+    ["ICQQ-Plugin"]="https://gitee.com/TimeRainStarSky/Yunzai-ICQQ-Plugin.git"
+)
+
+# 检查插件是否安装
+for plugin in "${!plugins[@]}"; do
+    echo -e "${GREEN}插件 $plugin 正在安装...${NC}"
+    if ! $GIT_CLONE "${plugins[$plugin]}" "$PLUGINS_DIR/$plugin"; then
+        echo -e "${RED}插件 $plugin 安装失败！${NC}"
+    fi
+done
+
+# 安装 pnpm
+if command -v pnpm &> /dev/null; then
+    echo -e "${GREEN}pnpm 已安装，无需重复安装。${NC}"
+else
+    echo -e "${RED}pnpm 未安装，开始安装...${NC}"
+    npm config set registry https://registry.npmmirror.com/
+    npm i -g pnpm
+fi
+
+# 安装项目依赖
+pnpm i
+
+# 安装椰奶状态依赖
+pnpm add systeminformation -w
+
+# 安装 pm2
+if command -v pm2 &> /dev/null; then
+    echo -e "${GREEN}pm2 已安装，无需重复安装。${NC}"
+else
+    echo -e "${RED}pm2 未安装，开始安装...${NC}"
+    npm install pm2 -g
+fi
+
+# 启动项目
+pnpm start
+
+# 保存 pm2 进程
+pnpm pm2 save
+
+# 设置 pm2 开机自启动
+pnpm pm2 startup
+
+# 停止项目
+pnpm stop
+
+# 启动项目
+node app

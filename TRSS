@@ -1,0 +1,265 @@
+#!/bin/bash
+
+# 清屏并定义颜色变量
+clear
+RED='\e[1;31m'       # 红色（粗体）
+GREEN='\e[1;32m'     # 绿色（粗体）
+YELLOW='\e[1;33m'    # 黄色（粗体）
+CYAN='\e[1;36m'      # 青色（粗体）
+NC='\e[0m'           # 重置颜色
+
+# 检查是否以 root 用户运行
+if [ "$(id -u)" -ne 0 ]; then
+    echo -e "${RED}错误：请以 root 用户运行此脚本！${NC}"
+    exit 1
+fi
+
+# 获取系统信息
+OS=$(lsb_release -is)
+VERSION_CODENAME=$(lsb_release -cs)
+
+# 询问用户是否更换软件源
+read -p "是否更换软件源？(y/n): " CHANGE_SOURCES
+if [ "$CHANGE_SOURCES" = "y" ]; then
+    # 备份原软件源文件
+    echo -e "${YELLOW}正在备份原软件源文件...${NC}"
+    cp /etc/apt/sources.list /etc/apt/sources.list.bak
+
+    # 定义更换软件源的函数
+    change_sources_for_debian() {
+        echo -e "${CYAN}检测到系统为 Debian $VERSION_CODENAME，更换软件源为 清华源...${NC}"
+        cat <<EOF > /etc/apt/sources.list
+deb https://mirrors.tuna.tsinghua.edu.cn/debian/ $VERSION_CODENAME main contrib non-free non-free-firmware
+deb https://mirrors.tuna.tsinghua.edu.cn/debian/ $VERSION_CODENAME-updates main contrib non-free non-free-firmware
+deb https://mirrors.tuna.tsinghua.edu.cn/debian/ $VERSION_CODENAME-backports main contrib non-free non-free-firmware
+deb https://security.debian.org/debian-security $VERSION_CODENAME-security main contrib non-free non-free-firmware
+EOF
+        echo -e "${GREEN}软件源更换完成！${NC}"
+    }
+
+    change_sources_for_ubuntu() {
+        echo -e "${CYAN}检测到系统为 Ubuntu $VERSION_CODENAME，更换软件源为 清华源...${NC}"
+        if [ "$VERSION_CODENAME" = "noble" ]; then
+            cat <<EOF > /etc/apt/sources.list
+Types: deb
+URIs: https://mirrors.tuna.tsinghua.edu.cn/ubuntu
+Suites: noble noble-updates noble-backports
+Components: main restricted universe multiverse
+Signed-By: /usr/share/keyrings/ubuntu-archive-keyring.gpg
+
+Types: deb
+URIs: http://security.ubuntu.com/ubuntu/
+Suites: noble-security
+Components: main restricted universe multiverse
+Signed-By: /usr/share/keyrings/ubuntu-archive-keyring.gpg
+EOF
+        else
+            cat <<EOF > /etc/apt/sources.list
+deb https://mirrors.tuna.tsinghua.edu.cn/ubuntu/ $VERSION_CODENAME main restricted universe multiverse
+deb https://mirrors.tuna.tsinghua.edu.cn/ubuntu/ $VERSION_CODENAME-updates main restricted universe multiverse
+deb https://mirrors.tuna.tsinghua.edu.cn/ubuntu/ $VERSION_CODENAME-backports main restricted universe multiverse
+deb http://security.ubuntu.com/ubuntu/ $VERSION_CODENAME-security main restricted universe multiverse
+EOF
+        fi
+        echo -e "${GREEN}软件源更换完成！${NC}"
+    }
+
+    # 根据系统类型更换软件源
+    if [ "$OS" = "Debian" ]; then
+        change_sources_for_debian
+    elif [ "$OS" = "Ubuntu" ]; then
+        change_sources_for_ubuntu
+    else
+        echo -e "${RED}错误：当前系统不是 Debian 或 Ubuntu，不更换软件源。${NC}"
+        exit 1
+    fi
+
+    # 更新软件源
+    echo -e "${YELLOW}正在更新软件源，请稍候...${NC}"
+    apt-get update
+fi
+
+# 安装 sudo
+echo -e "${GREEN}正在安装 sudo...${NC}"
+apt-get install -y sudo
+
+# 升级已安装的软件包
+echo -e "${GREEN}正在升级已安装的软件包...${NC}"
+sudo apt update && sudo apt upgrade -y
+
+# 安装 Git
+if ! command -v git &> /dev/null; then
+    echo -e "${RED}Git 未安装，开始安装...${NC}"
+    sudo apt update
+    sudo apt install -y git curl
+else
+    echo -e "${GREEN}Git 已安装，无需重复安装。${NC}"
+fi
+
+# 安装 Node.js
+if command -v node &> /dev/null; then
+    echo -e "${GREEN}Node.js 已安装，无需重复安装。${NC}"
+else
+    echo -e "${RED}Node.js 未安装，开始安装...${NC}"
+    curl -fsSL https://deb.nodesource.com/setup_22.x | sudo bash -
+    sudo apt-get install -y nodejs
+fi
+
+# 安装中文字体
+if dpkg -l | grep -q fonts-wqy-zenhei; then
+    echo -e "${GREEN}中文字体已安装，无需重复安装。${NC}"
+else
+    echo -e "${RED}中文字体未安装，开始安装...${NC}"
+    sudo apt-get install -y fonts-wqy-zenhei
+fi
+
+# 安装 FFmpeg
+if command -v ffmpeg &> /dev/null; then
+    echo -e "${GREEN}FFmpeg 已安装，无需重复安装。${NC}"
+else
+    echo -e "${RED}FFmpeg 未安装，开始安装...${NC}"
+    sudo apt-get install -y ffmpeg
+fi
+
+# 安装 Chromium 浏览器
+if [ "$OS" = "Ubuntu" ]; then
+    if dpkg -l | grep -q chromium-browser; then
+        echo -e "${GREEN}Chromium 浏览器已安装，无需重复安装。${NC}"
+    else
+        echo -e "${RED}Chromium 浏览器未安装，开始安装...${NC}"
+        sudo apt-get install -y chromium-browser
+    fi
+elif [ "$OS" = "Debian" ]; then
+    if dpkg -l | grep -q chromium; then
+        echo -e "${GREEN}Chromium 浏览器已安装，无需重复安装。${NC}"
+    else
+        echo -e "${RED}Chromium 浏览器未安装，开始安装...${NC}"
+        sudo apt-get install -y chromium
+    fi
+fi
+
+# 安装 Redis
+sudo apt-get install -y lsb-release curl gpg &> /dev/null
+if dpkg -l | grep -q redis; then
+    echo -e "${GREEN}Redis 已安装，无需重复安装。${NC}"
+else
+    echo -e "${RED}Redis 未安装，开始安装...${NC}"
+    curl -fsSL https://packages.redis.io/gpg | sudo gpg --dearmor -o /usr/share/keyrings/redis-archive-keyring.gpg
+    sudo chmod 644 /usr/share/keyrings/redis-archive-keyring.gpg
+    echo "deb [signed-by=/usr/share/keyrings/redis-archive-keyring.gpg] https://packages.redis.io/deb $(lsb_release -cs) main" | sudo tee /etc/apt/sources.list.d/redis.list
+    sudo apt-get update
+    sudo apt-get install -y redis
+    sudo systemctl enable redis-server
+    echo -e "${GREEN}Redis 安装完成并已启用。${NC}"
+fi
+
+# 清屏并验证安装
+clear
+echo -e "${GREEN}正在验证安装...${NC}"
+
+if command -v ffmpeg &> /dev/null; then
+    echo -e "${GREEN}FFmpeg 版本:${NC} $(ffmpeg -version | head -n 1)"
+else
+    echo -e "${RED}FFmpeg 未安装！${NC}"
+fi
+
+if command -v node &> /dev/null; then
+    echo -e "${GREEN}Node.js 版本:${NC} $(node --version)"
+else
+    echo -e "${RED}Node.js 未安装！${NC}"
+fi
+
+if command -v chromium &> /dev/null || command -v chromium-browser &> /dev/null; then
+    echo -e "${GREEN}Chromium 浏览器已安装。${NC}"
+else
+    echo -e "${RED}Chromium 浏览器未安装！${NC}"
+fi
+
+if systemctl is-active --quiet redis-server; then
+    echo -e "${GREEN}Redis 服务正在运行。${NC}"
+    sudo systemctl status redis-server | grep Active
+else
+    echo -e "${RED}Redis 服务未运行！${NC}"
+fi
+
+#!/bin/bash
+
+clear
+
+# 定义颜色
+RED='\e[1;31m'   # 红色加粗
+GREEN='\e[1;32m' # 绿色加粗
+NC='\e[0m'       # 无颜色
+
+# 安装 TRSS-Yunzai
+YUNZAI_DIR="Yunzai"
+PLUGINS_DIR="./plugins"
+GIT_CLONE="git clone --depth=1"
+
+# 克隆主项目
+echo -e "${GREEN} TRSS-Yunzai 正在安装...${NC}"
+$GIT_CLONE https://gitee.com/TimeRainStarSky/Yunzai
+
+cd $YUNZAI_DIR
+
+# 插件列表
+declare -A plugins=(
+
+    ["Guoba-Plugin"]="https://gitee.com/guoba-yunzai/guoba-plugin.git"
+
+    ["ws-plugin"]="https://gitee.com/xiaoye12123/ws-plugin"
+
+    ["rconsole-plugin"]="https://gitee.com/kyrzy0416/rconsole-plugin"
+
+    ["waves-plugin"]="https://github.com/erzaozi/waves-plugin"
+
+    ["yenai-plugin"]="https://gitee.com/yeyang52/yenai-plugin"
+
+    ["ICQQ-Plugin"]="https://gitee.com/TimeRainStarSky/Yunzai-ICQQ-Plugin.git"
+)
+
+# 检查插件是否安装
+for plugin in "${!plugins[@]}"; do
+    echo -e "${GREEN}插件 $plugin 正在安装...${NC}"
+    if ! $GIT_CLONE "${plugins[$plugin]}" "$PLUGINS_DIR/$plugin"; then
+        echo -e "${RED}插件 $plugin 安装失败！${NC}"
+    fi
+done
+
+# 安装 pnpm
+if command -v pnpm &> /dev/null; then
+    echo -e "${GREEN}pnpm 已安装，无需重复安装。${NC}"
+else
+    echo -e "${RED}pnpm 未安装，开始安装...${NC}"
+    npm config set registry https://registry.npmmirror.com/
+    npm i -g pnpm
+fi
+
+# 安装项目依赖
+pnpm i
+
+# 安装椰奶状态依赖
+pnpm add systeminformation -w
+
+# 安装 pm2
+if command -v pm2 &> /dev/null; then
+    echo -e "${GREEN}pm2 已安装，无需重复安装。${NC}"
+else
+    echo -e "${RED}pm2 未安装，开始安装...${NC}"
+    npm install pm2 -g
+fi
+
+# 启动项目
+pnpm start
+
+# 保存 pm2 进程
+pnpm pm2 save
+
+# 设置 pm2 开机自启动
+pnpm pm2 startup
+
+# 停止项目
+pnpm stop
+
+# 启动项目
+node app
