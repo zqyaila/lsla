@@ -1,0 +1,209 @@
+#!/bin/bash
+# NCQQ 交互式智能清理脚本 v4.0
+# 描述：交互式配置并清理 NCQQ 缓存
+
+# ===== 初始化配置 =====
+LOG_DIR="/var/log/ncqq_cleaner"
+mkdir -p "$LOG_DIR"
+LOG_FILE="${LOG_DIR}/clean_$(date +%Y%m%d_%H%M%S).log"
+exec > >(tee -a "$LOG_FILE") 2>&1
+
+# 默认配置
+DEFAULT_SINGLE_INSTANCE_DIR="/root/.config/QQ"
+DEFAULT_MULTI_INSTANCE_DIR="/opt/1panel/apps/local/napcat"
+CACHE_PATTERN="nt_*"
+
+# ===== 交互式配置函数 =====
+configure_cleaner() {
+    echo "===== NCQQ 缓存清理配置向导 ====="
+    
+    # 选择工作模式
+    while true; do
+        read -p "请选择工作模式 [1]单实例 [2]多实例 (默认:1): " mode
+        mode=${mode:-1}
+        
+        case $mode in
+            1) 
+                INSTANCE_MODE="single"
+                read -p "请输入单实例缓存目录 (默认: ${DEFAULT_SINGLE_INSTANCE_DIR}): " cache_root
+                CACHE_ROOT=${cache_root:-$DEFAULT_SINGLE_INSTANCE_DIR}
+                break
+                ;;
+            2)
+                INSTANCE_MODE="multi"
+                read -p "请输入多实例根目录 (默认: ${DEFAULT_MULTI_INSTANCE_DIR}): " cache_root
+                CACHE_ROOT=${cache_root:-$DEFAULT_MULTI_INSTANCE_DIR}
+                break
+                ;;
+            *)
+                echo "无效选择，请重新输入"
+                ;;
+        esac
+    done
+    
+    # 验证目录是否存在
+    if [ ! -d "$CACHE_ROOT" ]; then
+        echo "警告: 目录 $CACHE_ROOT 不存在!"
+        read -p "是否要创建此目录? [y/N] " create_dir
+        if [[ $create_dir =~ ^[Yy]$ ]]; then
+            mkdir -p "$CACHE_ROOT" || {
+                echo "目录创建失败!"
+                exit 1
+            }
+            echo "目录已创建: $CACHE_ROOT"
+        else
+            echo "使用默认目录: $DEFAULT_SINGLE_INSTANCE_DIR"
+            CACHE_ROOT=$DEFAULT_SINGLE_INSTANCE_DIR
+            mkdir -p "$CACHE_ROOT"
+        fi
+    fi
+    
+    # 选择清理模式
+    while true; do
+        read -p "请选择清理模式 [1]安全模式 [2]深度清理 (默认:1): " clean_mode
+        clean_mode=${clean_mode:-1}
+        
+        case $clean_mode in
+            1) 
+                CLEAN_MODE="conservative"
+                read -p "请输入保留天数 (默认:7): " keep_days
+                KEEP_DAYS=${keep_days:-7}
+                break
+                ;;
+            2)
+                CLEAN_MODE="aggressive"
+                KEEP_DAYS=0
+                break
+                ;;
+            *)
+                echo "无效选择，请重新输入"
+                ;;
+        esac
+    done
+    
+    # 确认配置
+    echo -e "\n===== 配置摘要 ====="
+    echo "工作模式: $INSTANCE_MODE"
+    echo "缓存目录: $CACHE_ROOT"
+    echo "清理模式: $CLEAN_MODE"
+    [ "$CLEAN_MODE" = "conservative" ] && echo "保留天数: $KEEP_DAYS"
+    
+    read -p "是否确认配置? [Y/n] " confirm
+    if [[ $confirm =~ ^[Nn]$ ]]; then
+        echo "配置已取消，退出脚本"
+        exit 0
+    fi
+}
+
+# ===== 缓存目录发现函数 =====
+find_cache_dirs() {
+    echo -e "\n正在搜索缓存目录..."
+    local cache_dirs=()
+    
+    if [ "$INSTANCE_MODE" = "single" ]; then
+        # 单实例模式 - 直接在指定目录查找
+        while IFS= read -r -d $'\0' dir; do
+            if [[ -d "$dir" ]]; then
+                cache_dirs+=("$dir")
+                echo "  发现缓存目录: $dir"
+            fi
+        done < <(find "$CACHE_ROOT" -maxdepth 1 -type d -name "$CACHE_PATTERN" -print0 2>/dev/null)
+    else
+        # 多实例模式 - 搜索子目录
+        while IFS= read -r -d $'\0' dir; do
+            if [[ -d "$dir" ]]; then
+                cache_dirs+=("$dir")
+                echo "  发现缓存目录: $dir"
+            fi
+        done < <(find "$CACHE_ROOT" -path "*/data/QQ/$CACHE_PATTERN" -type d -print0 2>/dev/null)
+    fi
+    
+    if [ ${#cache_dirs[@]} -eq 0 ]; then
+        echo "警告: 未找到任何缓存目录!"
+        echo "请检查以下路径是否存在缓存:"
+        if [ "$INSTANCE_MODE" = "single" ]; then
+            echo "  $CACHE_ROOT/$CACHE_PATTERN"
+        else
+            echo "  $CACHE_ROOT/*/data/QQ/$CACHE_PATTERN"
+        fi
+        exit 1
+    fi
+    
+    echo "共发现 ${#cache_dirs[@]} 个缓存目录"
+    CLEAN_DIRS=("${cache_dirs[@]}")
+}
+
+# ===== 清理函数 =====
+clean_directory() {
+    local target_dir="$1"
+    echo -e "\n处理目录: $target_dir"
+    
+    # 安全文件模式
+    local keep_patterns=(
+        "*.db"
+        "*.json"
+        "*.config"
+        "important_*"
+    )
+    
+    # 构建find命令
+    local find_cmd="find \"$target_dir\" -type f"
+    
+    # 添加保留规则
+    for pattern in "${keep_patterns[@]}"; do
+        find_cmd+=" ! -name \"$pattern\""
+    done
+    
+    # 添加时间条件
+    if [ "$CLEAN_MODE" = "conservative" ]; then
+        find_cmd+=" -mtime +$KEEP_DAYS"
+    fi
+    
+    # 构建执行命令
+    find_cmd+=" -exec echo \"[清理] 删除: {} \" ;"
+    find_cmd+=" -exec rm -fv {} \\;"
+    
+    # 记录统计信息
+    local pre_size=$(du -sh "$target_dir" 2>/dev/null | awk '{print $1}')
+    local pre_count=$(find "$target_dir" -type f 2>/dev/null | wc -l)
+    
+    echo "  清理前: 大小=${pre_size}, 文件数=${pre_count}"
+    
+    # 执行清理
+    eval "$find_cmd" > >(tee -a "$LOG_DIR/.tmp_clean.log") 2>&1
+    
+    # 记录清理结果
+    sleep 1  # 等待文件系统更新
+    local post_size=$(du -sh "$target_dir" 2>/dev/null | awk '{print $1}')
+    local post_count=$(find "$target_dir" -type f 2>/dev/null | wc -l)
+    local removed_count=$((pre_count - post_count))
+    
+    echo "  清理后: 大小=${post_size}, 文件数=${post_count}"
+    echo "  删除文件: ${removed_count} 个"
+}
+
+# ===== 主执行流程 =====
+echo "====== NCQQ 交互式缓存清理 ======"
+echo "开始时间: $(date +'%Y-%m-%d %H:%M:%S')"
+
+# 交互式配置
+configure_cleaner
+
+# 发现缓存目录
+find_cache_dirs
+
+# 执行清理
+echo -e "\n===== 开始清理 ====="
+for dir in "${CLEAN_DIRS[@]}"; do
+    clean_directory "$dir"
+done
+
+# 清理结果摘要
+echo -e "\n===== 清理完成 ====="
+echo "已清理目录:"
+for dir in "${CLEAN_DIRS[@]}"; do
+    echo "  - $dir"
+done
+echo "总处理目录数: ${#CLEAN_DIRS[@]}"
+echo "日志文件: $LOG_FILE"
+echo "完成时间: $(date +'%Y-%m-%d %H:%M:%S')"
